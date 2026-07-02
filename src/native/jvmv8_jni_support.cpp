@@ -41,8 +41,30 @@
 #include "jvmv8.hpp"
 #include "jvmv8_primitives.hpp"
 
-JNI::JNI(V8Scope& scope) : JNI(scope.env) {
+JNI::JNI(V8Scope& scope) : JNI(scope.env, &scope) {
 }
+
+V8Unlock::V8Unlock(V8Scope* scope) : isolate(nullptr) {
+    if (scope != nullptr) {
+        isolate = scope->isolate;
+        // Match the Isolate::Scope owned by the Java-to-V8 entry point. The
+        // callback-local V8Scope deliberately does not add another entry.
+        isolate->Exit();
+        unlocker.emplace(isolate);
+    }
+}
+
+V8Unlock::~V8Unlock() {
+    if (isolate != nullptr) {
+        unlocker.reset();
+        isolate->Enter();
+    }
+}
+
+#define JVMV8_JNI_CALL(expression) ([&]() { \
+    V8Unlock unlock(v8Scope);                    \
+    return (expression);                         \
+}())
 
 bool JNI::handledException() {
     if (env->ExceptionCheck()) {
@@ -65,7 +87,7 @@ jboolean JNI::CallBooleanMethod(jobject obj, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jboolean result = env->CallBooleanMethodV(obj, methodID, args);
+    jboolean result = JVMV8_JNI_CALL(env->CallBooleanMethodV(obj, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -82,7 +104,7 @@ jbyte JNI::CallByteMethod(jobject obj, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jbyte result = env->CallByteMethodV(obj, methodID, args);
+    jbyte result = JVMV8_JNI_CALL(env->CallByteMethodV(obj, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -99,7 +121,7 @@ jchar JNI::CallCharMethod(jobject obj, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jchar result = env->CallCharMethodV(obj, methodID, args);
+    jchar result = JVMV8_JNI_CALL(env->CallCharMethodV(obj, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -116,7 +138,7 @@ jshort JNI::CallShortMethod(jobject obj, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jshort result = env->CallShortMethod(obj, methodID, args);
+    jshort result = JVMV8_JNI_CALL(env->CallShortMethod(obj, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -133,7 +155,7 @@ jdouble JNI::CallDoubleMethod(jobject obj, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jdouble result = env->CallDoubleMethodV(obj, methodID, args);
+    jdouble result = JVMV8_JNI_CALL(env->CallDoubleMethodV(obj, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -150,7 +172,7 @@ jfloat JNI::CallFloatMethod(jobject obj, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jfloat result = env->CallFloatMethodV(obj, methodID, args);
+    jfloat result = JVMV8_JNI_CALL(env->CallFloatMethodV(obj, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -167,7 +189,7 @@ jint JNI::CallIntMethod(jobject obj, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jint result = env->CallIntMethodV(obj, methodID, args);
+    jint result = JVMV8_JNI_CALL(env->CallIntMethodV(obj, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -184,7 +206,7 @@ jlong JNI::CallLongMethod(jobject obj, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jlong result = env->CallLongMethodV(obj, methodID, args);
+    jlong result = JVMV8_JNI_CALL(env->CallLongMethodV(obj, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -201,7 +223,7 @@ jobject JNI::CallObjectMethod(jobject obj, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jobject result = env->CallObjectMethodV(obj, methodID, args);
+    jobject result = JVMV8_JNI_CALL(env->CallObjectMethodV(obj, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -218,7 +240,7 @@ void JNI::CallVoidMethod(jobject obj, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    env->CallVoidMethodV(obj, methodID, args);
+    JVMV8_JNI_CALL(env->CallVoidMethodV(obj, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -233,7 +255,7 @@ jboolean JNI::CallStaticBooleanMethod(jclass clazz, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jboolean result = env->CallStaticBooleanMethodV(clazz, methodID, args);
+    jboolean result = JVMV8_JNI_CALL(env->CallStaticBooleanMethodV(clazz, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -250,7 +272,7 @@ jbyte JNI::CallStaticByteMethod(jclass clazz, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jbyte result = env->CallStaticByteMethodV(clazz, methodID, args);
+    jbyte result = JVMV8_JNI_CALL(env->CallStaticByteMethodV(clazz, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -267,7 +289,7 @@ jchar JNI::CallStaticCharMethod(jclass clazz, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jchar result = env->CallStaticCharMethodV(clazz, methodID, args);
+    jchar result = JVMV8_JNI_CALL(env->CallStaticCharMethodV(clazz, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -284,7 +306,7 @@ jshort JNI::CallStaticShortMethod(jclass clazz, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jshort result = env->CallStaticShortMethod(clazz, methodID, args);
+    jshort result = JVMV8_JNI_CALL(env->CallStaticShortMethod(clazz, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -301,7 +323,7 @@ jdouble JNI::CallStaticDoubleMethod(jclass clazz, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jdouble result = env->CallStaticDoubleMethodV(clazz, methodID, args);
+    jdouble result = JVMV8_JNI_CALL(env->CallStaticDoubleMethodV(clazz, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -318,7 +340,7 @@ jfloat JNI::CallStaticFloatMethod(jclass clazz, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jfloat result = env->CallStaticFloatMethodV(clazz, methodID, args);
+    jfloat result = JVMV8_JNI_CALL(env->CallStaticFloatMethodV(clazz, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -335,7 +357,7 @@ jint JNI::CallStaticIntMethod(jclass clazz, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jint result = env->CallStaticIntMethodV(clazz, methodID, args);
+    jint result = JVMV8_JNI_CALL(env->CallStaticIntMethodV(clazz, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -352,7 +374,7 @@ jlong JNI::CallStaticLongMethod(jclass clazz, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jlong result = env->CallStaticLongMethodV(clazz, methodID, args);
+    jlong result = JVMV8_JNI_CALL(env->CallStaticLongMethodV(clazz, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -369,7 +391,7 @@ jobject JNI::CallStaticObjectMethod(jclass clazz, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jobject result = env->CallStaticObjectMethodV(clazz, methodID, args);
+    jobject result = JVMV8_JNI_CALL(env->CallStaticObjectMethodV(clazz, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -386,7 +408,7 @@ void JNI::CallStaticVoidMethod(jclass clazz, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    env->CallStaticVoidMethodV(clazz, methodID, args);
+    JVMV8_JNI_CALL(env->CallStaticVoidMethodV(clazz, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -401,7 +423,7 @@ jboolean JNI::CallBooleanMethodA(jobject obj, jmethodID methodID, jvalue* args) 
     assert(obj != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jboolean result = env->CallBooleanMethodA(obj, methodID, args);
+    jboolean result = JVMV8_JNI_CALL(env->CallBooleanMethodA(obj, methodID, args));
 
     if (handledException()) {
         return false;
@@ -416,7 +438,7 @@ jbyte JNI::CallByteMethodA(jobject obj, jmethodID methodID, jvalue* args) {
     assert(obj != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jbyte result = env->CallByteMethodA(obj, methodID, args);
+    jbyte result = JVMV8_JNI_CALL(env->CallByteMethodA(obj, methodID, args));
 
     if (handledException()) {
         return false;
@@ -431,7 +453,7 @@ jchar JNI::CallCharMethodA(jobject obj, jmethodID methodID, jvalue* args) {
     assert(obj != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jchar result = env->CallCharMethodA(obj, methodID, args);
+    jchar result = JVMV8_JNI_CALL(env->CallCharMethodA(obj, methodID, args));
 
     if (handledException()) {
         return 0;
@@ -446,7 +468,7 @@ jshort JNI::CallShortMethodA(jobject obj, jmethodID methodID, jvalue* args) {
     assert(obj != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jshort result = env->CallShortMethodA(obj, methodID, args);
+    jshort result = JVMV8_JNI_CALL(env->CallShortMethodA(obj, methodID, args));
 
     if (handledException()) {
         return 0;
@@ -461,7 +483,7 @@ jdouble JNI::CallDoubleMethodA(jobject obj, jmethodID methodID, jvalue* args) {
     assert(obj != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jdouble result = env->CallDoubleMethodA(obj, methodID, args);
+    jdouble result = JVMV8_JNI_CALL(env->CallDoubleMethodA(obj, methodID, args));
 
     if (handledException()) {
         return 0.0;
@@ -476,7 +498,7 @@ jfloat JNI::CallFloatMethodA(jobject obj, jmethodID methodID, jvalue* args) {
     assert(obj != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jfloat result = env->CallFloatMethodA(obj, methodID, args);
+    jfloat result = JVMV8_JNI_CALL(env->CallFloatMethodA(obj, methodID, args));
 
     if (handledException()) {
         return 0.0F;
@@ -491,7 +513,7 @@ jint JNI::CallIntMethodA(jobject obj, jmethodID methodID, jvalue* args) {
     assert(obj != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jint result = env->CallIntMethodA(obj, methodID, args);
+    jint result = JVMV8_JNI_CALL(env->CallIntMethodA(obj, methodID, args));
 
     if (handledException()) {
         return 0;
@@ -506,7 +528,7 @@ jlong JNI::CallLongMethodA(jobject obj, jmethodID methodID, jvalue* args) {
     assert(obj != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jlong result = env->CallLongMethodA(obj, methodID, args);
+    jlong result = JVMV8_JNI_CALL(env->CallLongMethodA(obj, methodID, args));
 
     if (handledException()) {
         return 0L;
@@ -521,7 +543,7 @@ jobject JNI::CallObjectMethodA(jobject obj, jmethodID methodID, jvalue* args) {
     assert(obj != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jobject result = env->CallObjectMethodA(obj, methodID, args);
+    jobject result = JVMV8_JNI_CALL(env->CallObjectMethodA(obj, methodID, args));
 
     if (handledException()) {
         return nullptr;
@@ -536,7 +558,7 @@ void JNI::CallVoidMethodA(jobject obj, jmethodID methodID, jvalue* args) {
     assert(obj != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    env->CallVoidMethodA(obj, methodID, args);
+    JVMV8_JNI_CALL(env->CallVoidMethodA(obj, methodID, args));
 
     if (handledException()) {
         return;
@@ -549,7 +571,7 @@ jboolean JNI::CallStaticBooleanMethodA(jclass clazz, jmethodID methodID, jvalue*
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jboolean result = env->CallStaticBooleanMethodA(clazz, methodID, args);
+    jboolean result = JVMV8_JNI_CALL(env->CallStaticBooleanMethodA(clazz, methodID, args));
 
     if (handledException()) {
         return false;
@@ -564,7 +586,7 @@ jbyte JNI::CallStaticByteMethodA(jclass clazz, jmethodID methodID, jvalue* args)
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jbyte result = env->CallStaticByteMethodA(clazz, methodID, args);
+    jbyte result = JVMV8_JNI_CALL(env->CallStaticByteMethodA(clazz, methodID, args));
 
     if (handledException()) {
         return false;
@@ -579,7 +601,7 @@ jchar JNI::CallStaticCharMethodA(jclass clazz, jmethodID methodID, jvalue* args)
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jchar result = env->CallStaticCharMethodA(clazz, methodID, args);
+    jchar result = JVMV8_JNI_CALL(env->CallStaticCharMethodA(clazz, methodID, args));
 
     if (handledException()) {
         return 0;
@@ -594,7 +616,7 @@ jshort JNI::CallStaticShortMethodA(jclass clazz, jmethodID methodID, jvalue* arg
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jshort result = env->CallStaticShortMethodA(clazz, methodID, args);
+    jshort result = JVMV8_JNI_CALL(env->CallStaticShortMethodA(clazz, methodID, args));
 
     if (handledException()) {
         return 0;
@@ -609,7 +631,7 @@ jdouble JNI::CallStaticDoubleMethodA(jclass clazz, jmethodID methodID, jvalue* a
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jdouble result = env->CallStaticDoubleMethodA(clazz, methodID, args);
+    jdouble result = JVMV8_JNI_CALL(env->CallStaticDoubleMethodA(clazz, methodID, args));
 
     if (handledException()) {
         return 0.0;
@@ -624,7 +646,7 @@ jfloat JNI::CallStaticFloatMethodA(jclass clazz, jmethodID methodID, jvalue* arg
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jfloat result = env->CallStaticFloatMethodA(clazz, methodID, args);
+    jfloat result = JVMV8_JNI_CALL(env->CallStaticFloatMethodA(clazz, methodID, args));
 
     if (handledException()) {
         return 0.0F;
@@ -639,7 +661,7 @@ jint JNI::CallStaticIntMethodA(jclass clazz, jmethodID methodID, jvalue* args) {
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jint result = env->CallStaticIntMethodA(clazz, methodID, args);
+    jint result = JVMV8_JNI_CALL(env->CallStaticIntMethodA(clazz, methodID, args));
 
     if (handledException()) {
         return 0;
@@ -654,7 +676,7 @@ jlong JNI::CallStaticLongMethodA(jclass clazz, jmethodID methodID, jvalue* args)
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jlong result = env->CallStaticLongMethodA(clazz, methodID, args);
+    jlong result = JVMV8_JNI_CALL(env->CallStaticLongMethodA(clazz, methodID, args));
 
     if (handledException()) {
         return 0L;
@@ -669,7 +691,7 @@ jobject JNI::CallStaticObjectMethodA(jclass clazz, jmethodID methodID, jvalue* a
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jobject result = env->CallStaticObjectMethodA(clazz, methodID, args);
+    jobject result = JVMV8_JNI_CALL(env->CallStaticObjectMethodA(clazz, methodID, args));
 
     if (handledException()) {
         return nullptr;
@@ -684,7 +706,7 @@ void JNI::CallStaticVoidMethodA(jclass clazz, jmethodID methodID, jvalue* args) 
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    env->CallStaticVoidMethodA(clazz, methodID, args);
+    JVMV8_JNI_CALL(env->CallStaticVoidMethodA(clazz, methodID, args));
 
     if (handledException()) {
         return;
@@ -698,7 +720,7 @@ jboolean JNI::CallNonvirtualBooleanMethodA(jobject obj, jclass clazz, jmethodID 
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jboolean result = env->CallNonvirtualBooleanMethodA(obj, clazz, methodID, args);
+    jboolean result = JVMV8_JNI_CALL(env->CallNonvirtualBooleanMethodA(obj, clazz, methodID, args));
 
     if (handledException()) {
         return false;
@@ -714,7 +736,7 @@ jbyte JNI::CallNonvirtualByteMethodA(jobject obj, jclass clazz, jmethodID method
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jbyte result = env->CallNonvirtualByteMethodA(obj, clazz, methodID, args);
+    jbyte result = JVMV8_JNI_CALL(env->CallNonvirtualByteMethodA(obj, clazz, methodID, args));
 
     if (handledException()) {
         return false;
@@ -730,7 +752,7 @@ jchar JNI::CallNonvirtualCharMethodA(jobject obj, jclass clazz, jmethodID method
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jchar result = env->CallNonvirtualCharMethodA(obj, clazz, methodID, args);
+    jchar result = JVMV8_JNI_CALL(env->CallNonvirtualCharMethodA(obj, clazz, methodID, args));
 
     if (handledException()) {
         return 0;
@@ -746,7 +768,7 @@ jshort JNI::CallNonvirtualShortMethodA(jobject obj, jclass clazz, jmethodID meth
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jshort result = env->CallNonvirtualShortMethodA(obj, clazz, methodID, args);
+    jshort result = JVMV8_JNI_CALL(env->CallNonvirtualShortMethodA(obj, clazz, methodID, args));
 
     if (handledException()) {
         return 0;
@@ -762,7 +784,7 @@ jdouble JNI::CallNonvirtualDoubleMethodA(jobject obj, jclass clazz, jmethodID me
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jdouble result = env->CallNonvirtualDoubleMethodA(obj, clazz, methodID, args);
+    jdouble result = JVMV8_JNI_CALL(env->CallNonvirtualDoubleMethodA(obj, clazz, methodID, args));
 
     if (handledException()) {
         return 0.0;
@@ -778,7 +800,7 @@ jfloat JNI::CallNonvirtualFloatMethodA(jobject obj, jclass clazz, jmethodID meth
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jfloat result = env->CallNonvirtualFloatMethodA(obj, clazz, methodID, args);
+    jfloat result = JVMV8_JNI_CALL(env->CallNonvirtualFloatMethodA(obj, clazz, methodID, args));
 
     if (handledException()) {
         return 0.0F;
@@ -794,7 +816,7 @@ jint JNI::CallNonvirtualIntMethodA(jobject obj, jclass clazz, jmethodID methodID
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jint result = env->CallNonvirtualIntMethodA(obj, clazz, methodID, args);
+    jint result = JVMV8_JNI_CALL(env->CallNonvirtualIntMethodA(obj, clazz, methodID, args));
 
     if (handledException()) {
         return 0;
@@ -810,7 +832,7 @@ jlong JNI::CallNonvirtualLongMethodA(jobject obj, jclass clazz, jmethodID method
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jlong result = env->CallNonvirtualLongMethodA(obj, clazz, methodID, args);
+    jlong result = JVMV8_JNI_CALL(env->CallNonvirtualLongMethodA(obj, clazz, methodID, args));
 
     if (handledException()) {
         return 0L;
@@ -826,7 +848,7 @@ jobject JNI::CallNonvirtualObjectMethodA(jobject obj, jclass clazz, jmethodID me
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jobject result = env->CallNonvirtualObjectMethodA(obj, clazz, methodID, args);
+    jobject result = JVMV8_JNI_CALL(env->CallNonvirtualObjectMethodA(obj, clazz, methodID, args));
 
     if (handledException()) {
         return nullptr;
@@ -842,7 +864,7 @@ void JNI::CallNonvirtualVoidMethodA(jobject obj, jclass clazz, jmethodID methodI
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    env->CallNonvirtualVoidMethodA(obj, clazz, methodID, args);
+    JVMV8_JNI_CALL(env->CallNonvirtualVoidMethodA(obj, clazz, methodID, args));
 
     if (handledException()) {
         return;
@@ -1642,7 +1664,7 @@ jobject JNI::NewObject(jclass clazz, jmethodID methodID, ...) {
     assert(methodID != 0);
     va_list args;
     va_start(args, methodID);
-    jobject result = env->NewObjectV(clazz, methodID, args);
+    jobject result = JVMV8_JNI_CALL(env->NewObjectV(clazz, methodID, args));
     va_end(args);
 
     if (handledException()) {
@@ -1658,7 +1680,7 @@ jobject JNI::NewObjectA(jclass clazz, jmethodID methodID, const jvalue *args) {
     assert(clazz != nullptr);
     assert(methodID != 0);
     assert(args != nullptr);
-    jobject result = env->NewObjectA(clazz, methodID, args);
+    jobject result = JVMV8_JNI_CALL(env->NewObjectA(clazz, methodID, args));
 
     if (handledException()) {
         return nullptr;
@@ -1752,7 +1774,7 @@ jint JNI::ThrowNew(jclass clazz, jmethodID methodID,...) {
     va_end(args);
 
     printAndClearException();
-    jthrowable jexp = (jthrowable)env->NewObjectV(clazz, methodID, args);
+    jthrowable jexp = (jthrowable)JVMV8_JNI_CALL(env->NewObjectV(clazz, methodID, args));
     return jexp != nullptr? env->Throw(jexp) : -1; // exception while creating an exception!
 }
 
@@ -1762,7 +1784,7 @@ jint JNI::GetJavaVM(JavaVM** vm) {
     return env->GetJavaVM(vm);
 }
 
-JNIForJS::JNIForJS(V8Scope& scope) : JNI(scope.env), scope(scope) {
+JNIForJS::JNIForJS(V8Scope& scope) : JNI(scope.env, &scope), scope(scope) {
     assert(!scope.context.IsEmpty());
 }
 
@@ -1777,7 +1799,7 @@ bool JNIForJS::handledException() {
     env->ExceptionClear();
 
     if (exception) {
-        jstring message = (jstring)env->CallObjectMethod(exception, throwableClassGetMessageMethodID, exception);
+        jstring message = (jstring)JVMV8_JNI_CALL(env->CallObjectMethod(exception, throwableClassGetMessageMethodID, exception));
 
         if (env->ExceptionOccurred()) {
             env->ExceptionDescribe();
@@ -1786,7 +1808,7 @@ bool JNIForJS::handledException() {
         }
 
         if (!message) {
-            message = (jstring)env->CallObjectMethod(exception, objectClassToStringMethodID);
+            message = (jstring)JVMV8_JNI_CALL(env->CallObjectMethod(exception, objectClassToStringMethodID));
 
             if (env->ExceptionOccurred()) {
                 env->ExceptionDescribe();

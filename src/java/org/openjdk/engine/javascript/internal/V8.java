@@ -133,6 +133,7 @@ public final class V8 {
 
     private static <T> T runInIsolate(final V8Isolate newIsolate, final Callable<T> callable) throws ScriptException {
         final V8Isolate oldIsolate = currentIsolate.get();
+        newIsolate.enter();
         try {
             currentIsolate.set(newIsolate);
             return callable.call();
@@ -144,16 +145,19 @@ public final class V8 {
             throw new RuntimeException(e);
         } finally {
             currentIsolate.set(oldIsolate);
+            newIsolate.exit();
         }
     }
 
     private static <T> T runInIsolate(final V8Isolate newIsolate, final Supplier<T> func) {
         final V8Isolate oldIsolate = currentIsolate.get();
+        newIsolate.enter();
         try {
             currentIsolate.set(newIsolate);
             return func.get();
         } finally {
             currentIsolate.set(oldIsolate);
+            newIsolate.exit();
         }
     }
 
@@ -215,11 +219,14 @@ public final class V8 {
     }
 
     private native static void releaseReference0(long isolateRef, long ref);
-    static void releaseReference(long isolateRef, String className, long ref) {
+    static void releaseReference(V8Isolate isolate, String className, long ref) {
         if (V8.DEBUG) {
             debugPrintf("Releasing %s: 0x%x", className, ref);
         }
-        releaseReference0(isolateRef, ref);
+        runInIsolate(isolate, (Supplier<Void>)() -> {
+            releaseReference0(isolate.getReference(), ref);
+            return null;
+        });
     }
 
     // stack trace helper
@@ -227,10 +234,8 @@ public final class V8 {
     public static StackTraceElement[] getStackTrace(V8Object exception) {
         final V8Isolate isolate = exception.getIsolate();
         return runInIsolate(isolate, (Supplier<StackTraceElement[]>)() -> {
-            synchronized(isolate) {
-                StackTraceElement[] frames = getStackTrace0(isolate.getReference(), exception.getReference());
-                return frames != null? frames : new StackTraceElement[0];
-            }
+            StackTraceElement[] frames = getStackTrace0(isolate.getReference(), exception.getReference());
+            return frames != null? frames : new StackTraceElement[0];
         });
     }
 
@@ -238,10 +243,8 @@ public final class V8 {
     static StackTraceElement[] getCurrentStackTrace(V8Object global) {
         V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Supplier<StackTraceElement[]>)() -> {
-            synchronized(isolate) {
-                StackTraceElement[] frames = getStackTrace1(isolate.getReference(), global.getReference());
-                return frames != null? frames : new StackTraceElement[0];
-            }
+            StackTraceElement[] frames = getStackTrace1(isolate.getReference(), global.getReference());
+            return frames != null? frames : new StackTraceElement[0];
         });
     }
 
@@ -250,16 +253,14 @@ public final class V8 {
     static V8UnboundScript compile(V8Object global, String name, String script) throws ScriptException {
         final V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Callable<V8UnboundScript>)() -> {
-            synchronized(isolate) {
-                if (V8.DEBUG) {
-                    debugPrintf("Compiling %s in global 0x%x", name, global.getReference());
-                }
-                long ref = compile0(isolate.getReference(), global.getReference(), name, script);
-                if (ref != 0 && V8.DEBUG) {
-                    debugPrintf("New compiled script 0x%x (global 0x%x)", ref, global.getReference());
-                }
-                return V8UnboundScript.create(isolate, ref);
+            if (V8.DEBUG) {
+                debugPrintf("Compiling %s in global 0x%x", name, global.getReference());
             }
+            long ref = compile0(isolate.getReference(), global.getReference(), name, script);
+            if (ref != 0 && V8.DEBUG) {
+                debugPrintf("New compiled script 0x%x (global 0x%x)", ref, global.getReference());
+            }
+            return V8UnboundScript.create(isolate, ref);
         });
     }
 
@@ -269,13 +270,11 @@ public final class V8 {
             String[] arguments, V8Object[] extensions) throws ScriptException {
         final V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Callable<V8Function>)() -> {
-            synchronized(isolate) {
-                if (V8.DEBUG) {
-                    debugPrintf("Compiling %s in global 0x%x", name, global.getReference());
-                }
-                return compileFunctionInContext0(isolate.getReference(), global.getReference(),
-                        name, script, arguments, extensions);
+            if (V8.DEBUG) {
+                debugPrintf("Compiling %s in global 0x%x", name, global.getReference());
             }
+            return compileFunctionInContext0(isolate.getReference(), global.getReference(),
+                    name, script, arguments, extensions);
         });
     }
 
@@ -283,29 +282,25 @@ public final class V8 {
     static Object eval(V8Object global, String name, String script) throws ScriptException {
         final V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Callable<Object>)() -> {
-            synchronized(isolate) {
-                if (V8.DEBUG) {
-                    debugPrintf("Evaluating %s in global 0x%x", name, global.getReference());
-                }
-                return eval0(isolate.getReference(), global.getReference(), name, script);
+            if (V8.DEBUG) {
+                debugPrintf("Evaluating %s in global 0x%x", name, global.getReference());
             }
+            return eval0(isolate.getReference(), global.getReference(), name, script);
         });
     }
 
     static Object eval(V8Object global, String name, String script, ScriptContext sc) throws ScriptException {
         final V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Callable<Object>)() -> {
-            synchronized(isolate) {
-                if (V8.DEBUG) {
-                    debugPrintf("Evaluating %s in global 0x%x", name, global.getReference());
-                }
-                ScriptContext oldCtx = isolate.getScriptContext();
-                isolate.setScriptContext(sc);
-                try {
-                    return eval0(isolate.getReference(), global.getReference(), name, script);
-                } finally {
-                    isolate.setScriptContext(oldCtx);
-                }
+            if (V8.DEBUG) {
+                debugPrintf("Evaluating %s in global 0x%x", name, global.getReference());
+            }
+            ScriptContext oldCtx = isolate.getScriptContext();
+            isolate.setScriptContext(sc);
+            try {
+                return eval0(isolate.getReference(), global.getReference(), name, script);
+            } finally {
+                isolate.setScriptContext(oldCtx);
             }
         });
     }
@@ -314,17 +309,15 @@ public final class V8 {
     static Object eval(V8Object global, V8UnboundScript script, ScriptContext sc) throws ScriptException {
         final V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Callable<Object>)() -> {
-            synchronized(isolate) {
-                if (V8.DEBUG) {
-                    debugPrintf("Evaluating compiled script 0x%x in global 0x%x", script.getReference(), global.getReference());
-                }
-                ScriptContext oldCtx = isolate.getScriptContext();
-                isolate.setScriptContext(sc);
-                try {
-                    return eval1(isolate.getReference(), global.getReference(), script.getReference());
-                } finally {
-                    isolate.setScriptContext(oldCtx);
-                }
+            if (V8.DEBUG) {
+                debugPrintf("Evaluating compiled script 0x%x in global 0x%x", script.getReference(), global.getReference());
+            }
+            ScriptContext oldCtx = isolate.getScriptContext();
+            isolate.setScriptContext(sc);
+            try {
+                return eval1(isolate.getReference(), global.getReference(), script.getReference());
+            } finally {
+                isolate.setScriptContext(oldCtx);
             }
         });
     }
@@ -334,9 +327,7 @@ public final class V8 {
     static String toString(V8Object obj) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<String>)() -> {
-            synchronized(isolate) {
-                return toString0(isolate.getReference(), obj.getReference());
-            }
+            return toString0(isolate.getReference(), obj.getReference());
         });
     }
 
@@ -347,9 +338,7 @@ public final class V8 {
             return false;
         }
         return runInIsolate(isolate1, (Supplier<Boolean>)() -> {
-            synchronized(isolate1) {
-                return strictEquals0(isolate1.getReference(), obj1.getReference(), obj2.getReference());
-            }
+            return strictEquals0(isolate1.getReference(), obj1.getReference(), obj2.getReference());
         });
     }
 
@@ -359,9 +348,7 @@ public final class V8 {
             return false;
         }
         return runInIsolate(isolate1, (Supplier<Boolean>)() -> {
-            synchronized(isolate1) {
-                return strictEquals0(isolate1.getReference(), sym1.getReference(), sym2.getReference());
-            }
+            return strictEquals0(isolate1.getReference(), sym1.getReference(), sym2.getReference());
         });
     }
 
@@ -369,9 +356,7 @@ public final class V8 {
     static Object invoke(V8Object object, Object thiz, Object[] args) throws ScriptException {
         final V8Isolate isolate = object.getIsolate();
         return runInIsolate(isolate, (Callable<Object>)() -> {
-            synchronized(isolate) {
-                return invoke0(isolate.getReference(), object.getReference(), thiz, args);
-            }
+            return invoke0(isolate.getReference(), object.getReference(), thiz, args);
         });
     }
 
@@ -392,14 +377,12 @@ public final class V8 {
     static Object invoke(V8Object object, Object thiz, Object[] args, ScriptContext sc) throws ScriptException {
         final V8Isolate isolate = object.getIsolate();
         return runInIsolate(isolate, (Callable<Object>)() -> {
-            synchronized(isolate) {
-                ScriptContext oldCtx = isolate.getScriptContext();
-                isolate.setScriptContext(sc);
-                try {
-                    return invoke0(isolate.getReference(), object.getReference(), thiz, args);
-                } finally {
-                    isolate.setScriptContext(oldCtx);
-                }
+            ScriptContext oldCtx = isolate.getScriptContext();
+            isolate.setScriptContext(sc);
+            try {
+                return invoke0(isolate.getReference(), object.getReference(), thiz, args);
+            } finally {
+                isolate.setScriptContext(oldCtx);
             }
         });
     }
@@ -431,9 +414,7 @@ public final class V8 {
     static Object newObject(V8Object object, Object[] args) throws ScriptException {
         final V8Isolate isolate = object.getIsolate();
         return runInIsolate(isolate, (Callable<Object>)() -> {
-            synchronized(isolate) {
-                return newObject0(isolate.getReference(), object.getReference(), args);
-            }
+            return newObject0(isolate.getReference(), object.getReference(), args);
         });
     }
 
@@ -441,9 +422,7 @@ public final class V8 {
     static String getConstructorName(V8Object obj) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<String>)() -> {
-            synchronized(isolate) {
-                return getConstructorName0(isolate.getReference(), obj.getReference());
-            }
+            return getConstructorName0(isolate.getReference(), obj.getReference());
         });
     }
 
@@ -451,9 +430,7 @@ public final class V8 {
     static boolean isCallable(V8Object obj) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return isCallable0(isolate.getReference(), obj.getReference());
-            }
+            return isCallable0(isolate.getReference(), obj.getReference());
         });
     }
 
@@ -461,9 +438,7 @@ public final class V8 {
     static Object get(V8Object obj, String name) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Object>)() -> {
-            synchronized(isolate) {
-                return get0(isolate.getReference(), obj.getReference(), name);
-            }
+            return get0(isolate.getReference(), obj.getReference(), name);
         });
     }
 
@@ -471,9 +446,7 @@ public final class V8 {
     static Object get(V8Object obj, int index) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Object>)() -> {
-            synchronized(isolate) {
-                return get1(isolate.getReference(), obj.getReference(), index);
-            }
+            return get1(isolate.getReference(), obj.getReference(), index);
         });
     }
 
@@ -481,9 +454,7 @@ public final class V8 {
     static Object get(V8Object obj, Object key) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Object>)() -> {
-            synchronized(isolate) {
-                return get2(isolate.getReference(), obj.getReference(), key);
-            }
+            return get2(isolate.getReference(), obj.getReference(), key);
         });
     }
 
@@ -491,9 +462,7 @@ public final class V8 {
     static Object put(V8Object obj, String name, Object value) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Object>)() -> {
-            synchronized(isolate) {
-                return put0(isolate.getReference(), obj.getReference(), name, value);
-            }
+            return put0(isolate.getReference(), obj.getReference(), name, value);
         });
     }
 
@@ -501,9 +470,7 @@ public final class V8 {
     static Object put(V8Object obj, int index, Object value) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Object>)() -> {
-            synchronized(isolate) {
-                return put1(isolate.getReference(), obj.getReference(), index, value);
-            }
+            return put1(isolate.getReference(), obj.getReference(), index, value);
         });
     }
 
@@ -511,9 +478,7 @@ public final class V8 {
     static Object put(V8Object obj, Object key, Object value) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Object>)() -> {
-            synchronized(isolate) {
-                return put2(isolate.getReference(), obj.getReference(), key, value);
-            }
+            return put2(isolate.getReference(), obj.getReference(), key, value);
         });
     }
 
@@ -521,9 +486,7 @@ public final class V8 {
     static boolean set(V8Object obj, String name, Object value) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return set0(isolate.getReference(), obj.getReference(), name, value);
-            }
+            return set0(isolate.getReference(), obj.getReference(), name, value);
         });
     }
 
@@ -531,9 +494,7 @@ public final class V8 {
     static boolean set(V8Object obj, int index, Object value) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return set1(isolate.getReference(), obj.getReference(), index, value);
-            }
+            return set1(isolate.getReference(), obj.getReference(), index, value);
         });
     }
 
@@ -541,9 +502,7 @@ public final class V8 {
     static boolean set(V8Object obj, Object key, Object value) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return set2(isolate.getReference(), obj.getReference(), key, value);
-            }
+            return set2(isolate.getReference(), obj.getReference(), key, value);
         });
     }
 
@@ -551,9 +510,7 @@ public final class V8 {
     static boolean contains(V8Object obj, String name) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return contains0(isolate.getReference(), obj.getReference(), name);
-            }
+            return contains0(isolate.getReference(), obj.getReference(), name);
         });
     }
 
@@ -561,9 +518,7 @@ public final class V8 {
     static boolean contains(V8Object obj, int index) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return contains1(isolate.getReference(), obj.getReference(), index);
-            }
+            return contains1(isolate.getReference(), obj.getReference(), index);
         });
     }
 
@@ -571,9 +526,7 @@ public final class V8 {
     static boolean contains(V8Object obj, Object key) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return contains2(isolate.getReference(), obj.getReference(), key);
-            }
+            return contains2(isolate.getReference(), obj.getReference(), key);
         });
     }
 
@@ -581,9 +534,7 @@ public final class V8 {
     static Object remove(V8Object obj, String name) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Object>)() -> {
-            synchronized(isolate) {
-                return remove0(isolate.getReference(), obj.getReference(), name);
-            }
+            return remove0(isolate.getReference(), obj.getReference(), name);
         });
     }
 
@@ -591,9 +542,7 @@ public final class V8 {
     static Object remove(V8Object obj, int index) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Object>)() -> {
-            synchronized(isolate) {
-                return remove1(isolate.getReference(), obj.getReference(), index);
-            }
+            return remove1(isolate.getReference(), obj.getReference(), index);
         });
     }
 
@@ -601,9 +550,7 @@ public final class V8 {
     static Object remove(V8Object obj, Object key) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Object>)() -> {
-            synchronized(isolate) {
-                return remove2(isolate.getReference(), obj.getReference(), key);
-            }
+            return remove2(isolate.getReference(), obj.getReference(), key);
         });
     }
 
@@ -611,9 +558,7 @@ public final class V8 {
     static boolean delete(V8Object obj, String name) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return delete0(isolate.getReference(), obj.getReference(), name);
-            }
+            return delete0(isolate.getReference(), obj.getReference(), name);
         });
     }
 
@@ -621,9 +566,7 @@ public final class V8 {
     static boolean delete(V8Object obj, int index) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return delete1(isolate.getReference(), obj.getReference(), index);
-            }
+            return delete1(isolate.getReference(), obj.getReference(), index);
         });
     }
 
@@ -631,9 +574,7 @@ public final class V8 {
     static boolean delete(V8Object obj, Object key) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return delete2(isolate.getReference(), obj.getReference(), key);
-            }
+            return delete2(isolate.getReference(), obj.getReference(), key);
         });
     }
 
@@ -641,9 +582,7 @@ public final class V8 {
     static int length(V8Object array) {
         final V8Isolate isolate = array.getIsolate();
         return runInIsolate(isolate, (Supplier<Integer>)() -> {
-            synchronized(isolate) {
-                return length0(isolate.getReference(), array.getReference());
-            }
+            return length0(isolate.getReference(), array.getReference());
         });
     }
 
@@ -699,9 +638,7 @@ public final class V8 {
     static EnumSet<PropertyAttribute> propertyAttributes(V8Object obj, String name) {
         final V8Isolate isolate = obj.getIsolate();
         int props = runInIsolate(isolate, (Supplier<Integer>)() -> {
-            synchronized(isolate) {
-                return propertyAttributes0(isolate.getReference(), obj.getReference(), name);
-            }
+            return propertyAttributes0(isolate.getReference(), obj.getReference(), name);
         });
         return toPropertyAttributes(props);
     }
@@ -710,9 +647,7 @@ public final class V8 {
     static EnumSet<PropertyAttribute> propertyAttributes(V8Object obj, int index) {
         final V8Isolate isolate = obj.getIsolate();
         int props = runInIsolate(isolate, (Supplier<Integer>)() -> {
-            synchronized(isolate) {
-                return propertyAttributes1(isolate.getReference(), obj.getReference(), index);
-            }
+            return propertyAttributes1(isolate.getReference(), obj.getReference(), index);
         });
         return toPropertyAttributes(props);
     }
@@ -721,9 +656,7 @@ public final class V8 {
     static EnumSet<PropertyAttribute> propertyAttributes(V8Object obj, Object key) {
         final V8Isolate isolate = obj.getIsolate();
         int props = runInIsolate(isolate, (Supplier<Integer>)() -> {
-            synchronized(isolate) {
-                return propertyAttributes2(isolate.getReference(), obj.getReference(), key);
-            }
+            return propertyAttributes2(isolate.getReference(), obj.getReference(), key);
         });
         return toPropertyAttributes(props);
     }
@@ -735,9 +668,7 @@ public final class V8 {
             final V8Object obj = (V8Object)jsObj;
             final V8Isolate isolate = obj.getIsolate();
             return runInIsolate(isolate, (Supplier<Integer>)() -> {
-                synchronized(isolate) {
-                    return propertyAttributes0(isolate.getReference(), obj.getReference(), name);
-                }
+                return propertyAttributes0(isolate.getReference(), obj.getReference(), name);
             });
         } else {
             // go via JSObject API route
@@ -752,9 +683,7 @@ public final class V8 {
             final V8Object obj = (V8Object)jsObj;
             final V8Isolate isolate = obj.getIsolate();
             return runInIsolate(isolate, (Supplier<Integer>)() -> {
-                synchronized(isolate) {
-                    return propertyAttributes2(isolate.getReference(), obj.getReference(), name);
-                }
+                return propertyAttributes2(isolate.getReference(), obj.getReference(), name);
             });
         } else {
             // go via JSObject API route
@@ -769,9 +698,7 @@ public final class V8 {
             final V8Object obj = (V8Object)jsObj;
             final V8Isolate isolate = obj.getIsolate();
             return runInIsolate(isolate, (Supplier<Integer>)() -> {
-                synchronized(isolate) {
-                    return propertyAttributes1(isolate.getReference(), obj.getReference(), index);
-                }
+                return propertyAttributes1(isolate.getReference(), obj.getReference(), index);
             });
         } else {
             // go via JSObject API route
@@ -783,10 +710,8 @@ public final class V8 {
     static boolean defineOwnProperty(V8Object obj, String name, Object value, EnumSet<PropertyAttribute> attrs) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return defineOwnProperty0(isolate.getReference(), obj.getReference(), name, value,
-                    fromPropertyAttributes(attrs));
-            }
+            return defineOwnProperty0(isolate.getReference(), obj.getReference(), name, value,
+                fromPropertyAttributes(attrs));
         });
     }
 
@@ -794,10 +719,8 @@ public final class V8 {
     static boolean defineOwnProperty(V8Object obj, V8Symbol name, Object value, EnumSet<PropertyAttribute> attrs) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return defineOwnProperty1(isolate.getReference(), obj.getReference(), name.getReference(),
-                    value, fromPropertyAttributes(attrs));
-            }
+            return defineOwnProperty1(isolate.getReference(), obj.getReference(), name.getReference(),
+                value, fromPropertyAttributes(attrs));
         });
     }
 
@@ -807,10 +730,8 @@ public final class V8 {
             JSFunction setter, EnumSet<PropertyAttribute> attrs) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return setAccessorProperty0(isolate.getReference(), obj.getReference(), name,
-                    getter, setter, fromPropertyAttributes(attrs));
-            }
+            return setAccessorProperty0(isolate.getReference(), obj.getReference(), name,
+                getter, setter, fromPropertyAttributes(attrs));
         });
     }
 
@@ -820,10 +741,8 @@ public final class V8 {
             JSFunction setter, EnumSet<PropertyAttribute> attrs) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return setAccessorProperty1(isolate.getReference(), obj.getReference(), name.getReference(),
-                    getter, setter, fromPropertyAttributes(attrs));
-            }
+            return setAccessorProperty1(isolate.getReference(), obj.getReference(), name.getReference(),
+                getter, setter, fromPropertyAttributes(attrs));
         });
     }
 
@@ -854,10 +773,8 @@ public final class V8 {
     static Object[] keys(V8Object obj) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<Object[]>)() -> {
-            synchronized(isolate) {
-                Object[] keys = keys0(isolate.getReference(), obj.getReference());
-                return keys != null? keys : new Object[0];
-            }
+            Object[] keys = keys0(isolate.getReference(), obj.getReference());
+            return keys != null? keys : new Object[0];
         });
     }
 
@@ -865,10 +782,8 @@ public final class V8 {
     static String[] namedKeys(V8Object obj) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<String[]>)() -> {
-            synchronized(isolate) {
-                String[] names = namedKeys0(isolate.getReference(), obj.getReference());
-                return names != null? names : new String[0];
-            }
+            String[] names = namedKeys0(isolate.getReference(), obj.getReference());
+            return names != null? names : new String[0];
         });
     }
 
@@ -876,10 +791,8 @@ public final class V8 {
     static int[] indexedKeys(V8Object obj) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<int[]>)() -> {
-            synchronized(isolate) {
-                int[] res = indexedKeys0(isolate.getReference(), obj.getReference());
-                return res != null? res : new int[0];
-            }
+            int[] res = indexedKeys0(isolate.getReference(), obj.getReference());
+            return res != null? res : new int[0];
         });
     }
 
@@ -887,10 +800,8 @@ public final class V8 {
     static JSSymbol[] symbolKeys(V8Object obj) {
         final V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<JSSymbol[]>)() -> {
-            synchronized(isolate) {
-                JSSymbol[] names = symbolKeys0(isolate.getReference(), obj.getReference());
-                return names != null? names : new JSSymbol[0];
-            }
+            JSSymbol[] names = symbolKeys0(isolate.getReference(), obj.getReference());
+            return names != null? names : new JSSymbol[0];
         });
     }
 
@@ -899,9 +810,7 @@ public final class V8 {
     static V8Object newObject(V8Object global) {
         final V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Supplier<V8Object>)() -> {
-            synchronized(isolate) {
-                return newObject1(isolate.getReference(), global.getReference());
-            }
+            return newObject1(isolate.getReference(), global.getReference());
         });
     }
 
@@ -912,9 +821,7 @@ public final class V8 {
         }
         final V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Supplier<V8Array>)() -> {
-            synchronized(isolate) {
-                return newArray0(isolate.getReference(), global.getReference(), length);
-            }
+            return newArray0(isolate.getReference(), global.getReference(), length);
         });
     }
 
@@ -925,9 +832,7 @@ public final class V8 {
         }
         final V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Supplier<V8Object>)() -> {
-            synchronized(isolate) {
-                return newArrayBuffer0(isolate.getReference(), global.getReference(), length);
-            }
+            return newArrayBuffer0(isolate.getReference(), global.getReference(), length);
         });
     }
 
@@ -944,9 +849,7 @@ public final class V8 {
 
         V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Supplier<V8Object>)() -> {
-            synchronized(isolate) {
-                return newArrayBuffer1(isolate.getReference(), global.getReference(), buf);
-            }
+            return newArrayBuffer1(isolate.getReference(), global.getReference(), buf);
         });
     }
 
@@ -956,14 +859,12 @@ public final class V8 {
     static ByteBuffer newByteBuffer(V8Object arrayBuf) {
         final V8Isolate isolate = arrayBuf.getIsolate();
         return runInIsolate(isolate, (Supplier<ByteBuffer>)() -> {
-            synchronized(isolate) {
-                ByteBuffer byteBuf = newByteBuffer0(isolate.getReference(), arrayBuf.getReference());
-                // V8 ArrayBuffer uses platform native order. Make sure nio Buffer follows the same order.
-                byteBuf.order(ByteOrder.nativeOrder());
-                // make sure V8 Arraybuffer lives till nio ByteBuffer lives by weak caching
-                isolate.cacheArrayBuffer(byteBuf, arrayBuf);
-                return byteBuf;
-            }
+            ByteBuffer byteBuf = newByteBuffer0(isolate.getReference(), arrayBuf.getReference());
+            // V8 ArrayBuffer uses platform native order. Make sure nio Buffer follows the same order.
+            byteBuf.order(ByteOrder.nativeOrder());
+            // make sure V8 Arraybuffer lives till nio ByteBuffer lives by weak caching
+            isolate.cacheArrayBuffer(byteBuf, arrayBuf);
+            return byteBuf;
         });
     }
 
@@ -971,9 +872,7 @@ public final class V8 {
     static V8Object newDate(V8Object global, double time) {
         final V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Supplier<V8Object>)() -> {
-            synchronized(isolate) {
-                return newDate0(isolate.getReference(), global.getReference(), time);
-            }
+            return newDate0(isolate.getReference(), global.getReference(), time);
         });
     }
 
@@ -981,9 +880,7 @@ public final class V8 {
     static V8Proxy newProxy(V8Object global, JSObject target, JSObject handler) {
         final V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Supplier<V8Proxy>)() -> {
-            synchronized(isolate) {
-                return newProxy0(isolate.getReference(), global.getReference(), target, handler);
-            }
+            return newProxy0(isolate.getReference(), global.getReference(), target, handler);
         });
     }
 
@@ -991,9 +888,7 @@ public final class V8 {
     static V8Resolver newResolver(V8Object global) {
         final V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Supplier<V8Resolver>)() -> {
-            synchronized(isolate) {
-                return newResolver0(isolate.getReference(), global.getReference());
-            }
+            return newResolver0(isolate.getReference(), global.getReference());
         });
     }
 
@@ -1001,9 +896,7 @@ public final class V8 {
     static V8Object newRegExp(V8Object global, String pattern, int flags) {
         final V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Supplier<V8Object>)() -> {
-            synchronized(isolate) {
-                return newRegExp0(isolate.getReference(), global.getReference(), pattern, flags);
-            }
+            return newRegExp0(isolate.getReference(), global.getReference(), pattern, flags);
         });
     }
 
@@ -1011,9 +904,7 @@ public final class V8 {
     static Object parseJSON(V8Object global, String jsonString) {
         final V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Supplier<Object>)() -> {
-            synchronized(isolate) {
-                return parseJSON0(isolate.getReference(), global.getReference(), jsonString);
-            }
+            return parseJSON0(isolate.getReference(), global.getReference(), jsonString);
         });
     }
 
@@ -1021,9 +912,7 @@ public final class V8 {
     static String toJSON(V8Object obj, String gap) {
         V8Isolate isolate = obj.getIsolate();
         return runInIsolate(isolate, (Supplier<String>)() -> {
-            synchronized(isolate) {
-                return toJSON0(isolate.getReference(), obj.getReference(), gap);
-            }
+            return toJSON0(isolate.getReference(), obj.getReference(), gap);
         });
     }
 
@@ -1034,9 +923,7 @@ public final class V8 {
         } else {
             V8Isolate isolate = global.getIsolate();
             return runInIsolate(isolate, (Supplier<String>)() -> {
-                synchronized(isolate) {
-                    return toJSON1(isolate.getReference(), global.getReference(), jsObj, gap);
-                }
+                return toJSON1(isolate.getReference(), global.getReference(), jsObj, gap);
             });
         }
     }
@@ -1044,54 +931,42 @@ public final class V8 {
     private native static V8Symbol newSymbol0(long isolateRef, String name);
     static V8Symbol newSymbol(V8Isolate isolate, String name) {
         return runInIsolate(isolate, (Supplier<V8Symbol>)() -> {
-            synchronized(isolate) {
-                return newSymbol0(isolate.getReference(), name);
-            }
+            return newSymbol0(isolate.getReference(), name);
         });
     }
 
     private native static V8Symbol symbolFor0(long isolateRef, String name);
     static V8Symbol symbolFor(V8Isolate isolate, String name) {
         return runInIsolate(isolate, (Supplier<V8Symbol>)() -> {
-            synchronized(isolate) {
-                return symbolFor0(isolate.getReference(), name);
-            }
+            return symbolFor0(isolate.getReference(), name);
         });
     }
 
     private native static V8Symbol getIteratorSymbol0(long isolateRef);
     static V8Symbol getIteratorSymbol(V8Isolate isolate) {
         return runInIsolate(isolate, (Supplier<V8Symbol>)() -> {
-            synchronized(isolate) {
-                return getIteratorSymbol0(isolate.getReference());
-            }
+            return getIteratorSymbol0(isolate.getReference());
         });
     }
 
     private native static V8Symbol getUnscopablesSymbol0(long isolateRef);
     static V8Symbol getUnscopablesSymbol(V8Isolate isolate) {
         return runInIsolate(isolate, (Supplier<V8Symbol>)() -> {
-            synchronized(isolate) {
-                return getUnscopablesSymbol0(isolate.getReference());
-            }
+            return getUnscopablesSymbol0(isolate.getReference());
         });
     }
 
     private native static V8Symbol getToStringTagSymbol0(long isolateRef);
     static V8Symbol getToStringTagSymbol(V8Isolate isolate) {
         return runInIsolate(isolate, (Supplier<V8Symbol>)() -> {
-            synchronized(isolate) {
-                return getToStringTagSymbol0(isolate.getReference());
-            }
+            return getToStringTagSymbol0(isolate.getReference());
         });
     }
 
     private native static V8Symbol getIsConcatSpreadableSymbol0(long isolateRef);
     static V8Symbol getIsConcatSpreadableSymbol(V8Isolate isolate) {
         return runInIsolate(isolate, (Supplier<V8Symbol>)() -> {
-            synchronized(isolate) {
-                return getIsConcatSpreadableSymbol0(isolate.getReference());
-            }
+            return getIsConcatSpreadableSymbol0(isolate.getReference());
         });
     }
 
@@ -1107,9 +982,7 @@ public final class V8 {
         Objects.requireNonNull(message);
         final V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Supplier<V8Object>)() -> {
-            synchronized(isolate) {
-                return newError0(isolate.getReference(), global.getReference(), message, type);
-            }
+            return newError0(isolate.getReference(), global.getReference(), message, type);
         });
     }
 
@@ -1138,9 +1011,7 @@ public final class V8 {
     static boolean resolverResolve(V8Resolver resolver, Object result) {
         final V8Isolate isolate = resolver.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return resolverResolve0(isolate.getReference(), resolver.getReference(), result);
-            }
+            return resolverResolve0(isolate.getReference(), resolver.getReference(), result);
         });
     }
 
@@ -1148,9 +1019,7 @@ public final class V8 {
     static boolean resolverReject(V8Resolver resolver, Object result) {
         final V8Isolate isolate = resolver.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return resolverReject0(isolate.getReference(), resolver.getReference(), result);
-            }
+            return resolverReject0(isolate.getReference(), resolver.getReference(), result);
         });
     }
 
@@ -1158,9 +1027,7 @@ public final class V8 {
     static V8Promise resolverGetPromise(V8Resolver resolver) {
         final V8Isolate isolate = resolver.getIsolate();
         return runInIsolate(isolate, (Supplier<V8Promise>)() -> {
-            synchronized(isolate) {
-                return resolverGetPromise0(isolate.getReference(), resolver.getReference());
-            }
+            return resolverGetPromise0(isolate.getReference(), resolver.getReference());
         });
     }
 
@@ -1170,9 +1037,7 @@ public final class V8 {
         Objects.requireNonNull(handler);
         final V8Isolate isolate = promise.getIsolate();
         return runInIsolate(isolate, (Supplier<V8Promise>)() -> {
-            synchronized(isolate) {
-                return promiseCatch0(isolate.getReference(), promise.getReference(), handler);
-            }
+            return promiseCatch0(isolate.getReference(), promise.getReference(), handler);
         });
     }
 
@@ -1181,9 +1046,7 @@ public final class V8 {
         Objects.requireNonNull(handler);
         final V8Isolate isolate = promise.getIsolate();
         return runInIsolate(isolate, (Supplier<V8Promise>)() -> {
-            synchronized(isolate) {
-                return promiseThen0(isolate.getReference(), promise.getReference(), handler);
-            }
+            return promiseThen0(isolate.getReference(), promise.getReference(), handler);
         });
     }
 
@@ -1191,9 +1054,7 @@ public final class V8 {
     static boolean promiseHasHandler(V8Promise promise) {
         final V8Isolate isolate = promise.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return promiseHasHandler0(isolate.getReference(), promise.getReference());
-            }
+            return promiseHasHandler0(isolate.getReference(), promise.getReference());
         });
     }
 
@@ -1202,9 +1063,7 @@ public final class V8 {
     static JSObject proxyGetTarget(V8Proxy proxy) {
         final V8Isolate isolate = proxy.getIsolate();
         return runInIsolate(isolate, (Supplier<JSObject>)() -> {
-            synchronized(isolate) {
-                return proxyGetTarget0(isolate.getReference(), proxy.getReference());
-            }
+            return proxyGetTarget0(isolate.getReference(), proxy.getReference());
         });
     }
 
@@ -1212,9 +1071,7 @@ public final class V8 {
     static JSObject proxyGetHandler(V8Proxy proxy) {
         final V8Isolate isolate = proxy.getIsolate();
         return runInIsolate(isolate, (Supplier<JSObject>)() -> {
-            synchronized(isolate) {
-                return proxyGetHandler0(isolate.getReference(), proxy.getReference());
-            }
+            return proxyGetHandler0(isolate.getReference(), proxy.getReference());
         });
     }
 
@@ -1222,9 +1079,7 @@ public final class V8 {
     static boolean proxyIsRevoked(V8Proxy proxy) {
         final V8Isolate isolate = proxy.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return proxyIsRevoked0(isolate.getReference(), proxy.getReference());
-            }
+            return proxyIsRevoked0(isolate.getReference(), proxy.getReference());
         });
     }
 
@@ -1233,10 +1088,8 @@ public final class V8 {
     static void allowCodeGenerationFromStrings(V8Object global, boolean allow) {
         final V8Isolate isolate = global.getIsolate();
         runInIsolate(isolate, (Supplier<Void>)() -> {
-            synchronized(isolate) {
-                allowCodeGenerationFromStrings0(isolate.getReference(), global.getReference(), allow);
-                return null;
-            }
+            allowCodeGenerationFromStrings0(isolate.getReference(), global.getReference(), allow);
+            return null;
         });
     }
 
@@ -1244,9 +1097,7 @@ public final class V8 {
     static boolean isCodeGenerationFromStringsAllowed(V8Object global) {
         final V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Supplier<Boolean>)() -> {
-            synchronized(isolate) {
-                return isCodeGenerationFromStringsAllowed0(isolate.getReference(), global.getReference());
-            }
+            return isCodeGenerationFromStringsAllowed0(isolate.getReference(), global.getReference());
         });
     }
 
@@ -1265,9 +1116,7 @@ public final class V8 {
     private static native void runMicrotasks0(long isolateRef);
     public static void runMicrotasks(V8Isolate isolate) {
         runInIsolate(isolate, (Supplier<Void>)() -> {
-            synchronized(isolate) {
-                runMicrotasks0(isolate.getReference());
-            }
+            runMicrotasks0(isolate.getReference());
             return null;
         });
     }
@@ -1287,9 +1136,7 @@ public final class V8 {
             throw new IllegalArgumentException("Expected a V8 script function from the current engine");
         }
 
-        synchronized(isolate) {
-            enqueueMicrotask0(isolate.getReference(), global.getReference(), v8Func.getReference());
-        }
+        enqueueMicrotask0(isolate.getReference(), global.getReference(), v8Func.getReference());
     }
 
     private static native void throwException0(long isolateRef, Object exception);
@@ -1304,7 +1151,6 @@ public final class V8 {
             throw new IllegalStateException("Throwing exception to another V8Isolate!");
         }
 
-        assert Thread.holdsLock(isolate);
         throwException0(isolate.getReference(), exception);
         return null;
     }
@@ -1720,17 +1566,15 @@ public final class V8 {
     public static JSObject loadModule(V8Object global, String name, String moduleSource, ScriptContext sc) throws ScriptException {
         final V8Isolate isolate = global.getIsolate();
         return runInIsolate(isolate, (Callable<JSObject>)() -> {
-            synchronized(isolate) {
-                if (V8.DEBUG) {
-                    debugPrintf("Evaluating %s in global 0x%x", name, global.getReference());
-                }
-                ScriptContext oldCtx = isolate.getScriptContext();
-                isolate.setScriptContext(sc);
-                try {
-                    return loadModule0(isolate.getReference(), global.getReference(), name, moduleSource);
-                } finally {
-                    isolate.setScriptContext(oldCtx);
-                }
+            if (V8.DEBUG) {
+                debugPrintf("Evaluating %s in global 0x%x", name, global.getReference());
+            }
+            ScriptContext oldCtx = isolate.getScriptContext();
+            isolate.setScriptContext(sc);
+            try {
+                return loadModule0(isolate.getReference(), global.getReference(), name, moduleSource);
+            } finally {
+                isolate.setScriptContext(oldCtx);
             }
         });
     }

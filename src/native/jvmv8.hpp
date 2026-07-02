@@ -26,6 +26,8 @@
 #ifndef __jvmv8_h__
 #define __jvmv8_h__
 
+#include <optional>
+
 using namespace v8;
 
 class TRACER {
@@ -238,7 +240,7 @@ public:
 
 protected:
     Locker locker;                // V8 locker
-    Isolate::Scope isolateScope;  // Current V8 scope
+    std::optional<Isolate::Scope> isolateScope; // Current V8 scope. Empty in a V8 callback.
     HandleScope handleScope;      // Current V8 local scope
     TryCatch tryCatch;            // Current V8 try catch handler
 

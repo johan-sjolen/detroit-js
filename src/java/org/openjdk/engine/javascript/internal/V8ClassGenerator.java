@@ -426,7 +426,17 @@ class V8ClassGenerator extends V8Generator {
         p("}"); nl();
     }
 
-    private void callMethod(Method method, boolean isStatic) {
+    private void methodArguments(Class<?>[] parameterTypes, boolean isVarArgs) {
+        if (parameterTypes.length > 0) { nl(); }
+        begin();
+        for (int i = 0; i < parameterTypes.length; i++) {
+            typeArgument(parameterTypes[i], i, isVarArgs && i == parameterTypes.length - 1);
+            p(","); nl();
+        }
+        end();
+    }
+
+    private void callMethod(Method method, boolean isStatic, int callSiteIndex) {
         String name = method.getName();
         String signature = executableSignature(method);
         Class<?>[] parameterTypes = method.getParameterTypes();
@@ -446,16 +456,24 @@ class V8ClassGenerator extends V8Generator {
         begin();
             long methodID = isStatic ? V8.getStaticMethodID0(cls, name, signature) : V8.getMethodID0(cls, name, signature);
 
+            p("const bridge = this[asyncBridge];"); nl();
+            p("if (bridge) {"); nl();
+            begin();
+                // These variables are created by generatePropertyInvoker.
+                // They act as a resolution cache. A little bit too fancy maybe?
+                p("asyncCallSite"); p(callSiteIndex); p(" ||= bridge.resolve(this[javaObject], ");
+                q(name); p(", "); q(signature); p(", ");
+                p(Boolean.toString(isStatic)); p(");"); nl();
+                p("return bridge.invokeResolved(asyncCallSite"); p(callSiteIndex);
+                p(", this[javaObject], [");
+                methodArguments(parameterTypes, isVarArgs);
+                p("]);"); nl();
+            end();
+            p("}"); nl();
+
             p("const result = JVM.call"); p(isStatic ? "Static" : ""); p("Method(this[javaObject], ");
             id(methodID); p(", "); q(signature); p(", [");
-            if (parameterCount > 0) { nl(); }
-            begin();
-                for (int i = 0; i < parameterCount; i++) {
-                    Class<?> type = parameterTypes[i];
-                    typeArgument(parameterTypes[i], i, isVarArgs && i == parameterCount - 1);
-                    p(","); nl();
-                }
-            end();
+            methodArguments(parameterTypes, isVarArgs);
             p("]);"); nl();
 
             typeReturn(returnType);
@@ -467,15 +485,23 @@ class V8ClassGenerator extends V8Generator {
         Method[] methods = methodList.toArray(new Method[0]);
         sortByParameterWeight(methods);
 
-        p(property); p(": function() {"); nl();
+        p(property); p(": (() => {"); nl();
         begin();
-            p("const count = arguments.length;"); nl();
-            for (Method method : methods) {
-                callMethod(method, isStatic);
+            // Cache asyncCallSites. `callMethod` uses them when generating code.
+            for (int index = 0; index < methods.length; index++) {
+                p("let asyncCallSite"); p(index); p(";"); nl();
             }
-            p("throw new TypeError('Cannot invoke method with the passed arguments: no matching signature');"); nl();
+            p("return function() {"); nl();
+            begin();
+                p("const count = arguments.length;"); nl();
+                for (int index = 0; index < methods.length; index++) {
+                    callMethod(methods[index], isStatic, index);
+                }
+                p("throw new TypeError('Cannot invoke method with the passed arguments: no matching signature');"); nl();
             end();
-        p("},"); nl();
+            p("};"); nl();
+        end();
+        p("})(),"); nl();
     }
 
     private void generatePropertyDescriptor(String name, boolean isStatic, List<Method> methods,

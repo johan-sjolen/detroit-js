@@ -19,3 +19,5 @@
 /samples/maven/.classpath
 /samples/maven/.project
 /samples/maven/.settings/
+build-project.sh
+run-yielding-tests.sh

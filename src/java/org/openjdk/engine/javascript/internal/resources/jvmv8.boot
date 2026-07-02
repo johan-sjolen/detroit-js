@@ -58,6 +58,8 @@
     const isList = Symbol('isList');
     // Symbol for classes for static properties
     const staticProperties = Symbol('staticProperties');
+    // Symbol placed on the lightweight receiver returned by Java.async
+    const asyncBridge = Symbol('asyncBridge');
 
     // Minimum and maximum java long values
     const MIN_LONG = -0x8000000000000000;
@@ -1055,6 +1057,23 @@
         },
         isJavaObject: {
             value: isJavaObject,
+            configurable: true,
+            writable: true
+        },
+        async: {
+            value: function async(target) {
+                if ((typeof target !== 'object' && typeof target !== 'function')
+                        || target === null || !(javaObject in target)) {
+                    throw new TypeError('Java.async expects a Java object or class');
+                }
+                const bridge = GLOBAL.__detroitAsyncBridge;
+                if (!bridge) {
+                    throw new TypeError('Java.async requires an asynchronous program runtime');
+                }
+                const receiver = Object.create(target);
+                Object.defineProperty(receiver, asyncBridge, { value: bridge });
+                return receiver;
+            },
             configurable: true,
             writable: true
         }

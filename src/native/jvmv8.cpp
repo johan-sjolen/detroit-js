@@ -181,7 +181,7 @@ V8Scope::V8Scope(JNIEnv* env, Isolate* isolate, Local<Context> context) :
     env(env),
     isolate(isolate),
     locker(isolate),
-    isolateScope(isolate),
+    isolateScope(std::in_place, isolate),
     handleScope(isolate),
     tryCatch(isolate),
     context(context),
@@ -194,7 +194,7 @@ V8Scope::V8Scope(JNIEnv* env, jlong isolateRef, jlong objectRef) :
     env(env),
     isolate(fromReference<Isolate*>(isolateRef)),
     locker(this->isolate),
-    isolateScope(this->isolate),
+    isolateScope(std::in_place, this->isolate),
     handleScope(this->isolate),
     tryCatch(this->isolate),
     context(j2v_context(isolate, objectRef)),
@@ -207,7 +207,7 @@ V8Scope::V8Scope(JNIEnv* env, Isolate* isolate) :
     env(env),
     isolate(isolate),
     locker(this->isolate),
-    isolateScope(this->isolate),
+    isolateScope(std::in_place, this->isolate),
     handleScope(this->isolate),
     tryCatch(this->isolate),
     // MUST NOT call GetCurrentContext before locking and
@@ -219,7 +219,16 @@ V8Scope::V8Scope(JNIEnv* env, Isolate* isolate) :
 
 // Constructor when only the isolate is known
 V8Scope::V8Scope(Isolate* isolate) :
-    V8Scope(JVMV8IsolateData::getEnv(isolate), isolate) {
+    env(JVMV8IsolateData::getEnv(isolate)),
+    isolate(isolate),
+    locker(isolate),
+    // V8 has already entered the isolate before invoking an embedder callback.
+    // Do not add another entry: V8Unlock needs to be able to Exit it completely.
+    isolateScope(std::nullopt),
+    handleScope(isolate),
+    tryCatch(isolate),
+    context(isolate->GetCurrentContext()),
+    contextScope(context) {
     TRACE("V8Scope::V8Scope 4");
 }
 

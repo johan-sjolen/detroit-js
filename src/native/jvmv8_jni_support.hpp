@@ -26,7 +26,26 @@
 #ifndef __jvmv8_jni_support_hpp__
 #define __jvmv8_jni_support_hpp__
 
+#include <optional>
+
 class V8Scope;
+
+// Unlock the scope's isolate for other Contexts to execute.
+// This, in effect, yields the execution of one script, allowing the isolate
+// of the scope to execute another program.
+// We use this to introduce more efficient usage of the available isolates.
+class V8Unlock {
+private:
+    v8::Isolate* isolate;
+    std::optional<v8::Unlocker> unlocker;
+
+public:
+    explicit V8Unlock(V8Scope* scope);
+    ~V8Unlock();
+
+    V8Unlock(const V8Unlock&) = delete;
+    V8Unlock& operator=(const V8Unlock&) = delete;
+};
 
 extern thread_local int indent;
 
@@ -43,11 +62,16 @@ private:
 
 protected:
     JNIEnv* env;
+    // Non-null while a JavaScript-facing native operation owns the isolate.
+    V8Scope* v8Scope;
+
+    JNI(JNIEnv* env, V8Scope* v8Scope) : env(env), v8Scope(v8Scope) {
+    }
 
     virtual bool handledException();
 
 public:
-    JNI(JNIEnv* env) : env(env) {
+    JNI(JNIEnv* env) : env(env), v8Scope(nullptr) {
     }
 
     JNI(V8Scope& scope);

@@ -29,26 +29,35 @@ import org.openjdk.engine.javascript.V8Inspector;
 
 import java.net.URL;
 import java.nio.ByteBuffer;
+import java.util.Collections;
+import java.util.Map;
 import java.util.Objects;
 import java.util.WeakHashMap;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import javax.script.ScriptContext;
 
 public final class V8Isolate implements V8Inspector {
     private volatile long reference;
     // java supported in this isolate or not?
     private final boolean javaSupport;
-    // lazily initialized
-    private WeakHashMap<ByteBuffer, V8Object> arrayBufferCache;
+    // V8 serializes native isolate access, but this cache is updated after a
+    // native call returns and therefore needs its own Java-side protection.
+    private final Map<ByteBuffer, V8Object> arrayBufferCache = new WeakHashMap<>();
 
     private ClassLoader classLoader;
-    // Current ScriptContext instance.
-    private ScriptContext context;
+    // ScriptContext is execution-local once the isolate can hand off between
+    // JavaScript programs. The default is used outside an active evaluation.
+    private ScriptContext defaultContext;
+    private final ThreadLocal<ScriptContext> context = new ThreadLocal<>();
 
+    // All threads utilizing this isolate must take the lifecycleLock's read-lock.
+    // The write-lock is taken when the isolate is killed, at which points `reference` is 0L.
+    private final ReentrantReadWriteLock lifecycleLock = new ReentrantReadWriteLock(true);
     // inspector support
     // inspector enabled?
     private final boolean inspector;
     // set only when inspector is true
-    private V8Inspector.Listener inspectorListener;
+    private volatile V8Inspector.Listener inspectorListener;
 
     private V8Isolate(long ref, boolean javaSupport, boolean inspector) {
         this.reference = ref;
@@ -77,11 +86,32 @@ public final class V8Isolate implements V8Inspector {
     }
 
     public ScriptContext getScriptContext() {
-        return context;
+        ScriptContext current = context.get();
+        return current != null? current : defaultContext;
     }
 
     void setScriptContext(ScriptContext context) {
-        this.context = context;
+        if (context == null) {
+            this.context.remove();
+        } else {
+            this.context.set(context);
+        }
+    }
+
+    void setDefaultScriptContext(ScriptContext context) {
+        this.defaultContext = context;
+    }
+
+    void enter() {
+        lifecycleLock.readLock().lock();
+        if (isDisposed()) {
+            lifecycleLock.readLock().unlock();
+            throw new IllegalStateException("V8 Isolate already closed");
+        }
+    }
+
+    void exit() {
+        lifecycleLock.readLock().unlock();
     }
 
     // get resource URL using the Isolate specific class loader (if not null)
@@ -106,9 +136,6 @@ public final class V8Isolate implements V8Inspector {
     }
 
     void cacheArrayBuffer(ByteBuffer byteBuf, V8Object arrayBuf) {
-        if (arrayBufferCache == null) {
-            arrayBufferCache = new WeakHashMap<>();
-        }
         arrayBufferCache.put(byteBuf, arrayBuf);
     }
 
@@ -117,7 +144,8 @@ public final class V8Isolate implements V8Inspector {
     }
 
     // This method is used as cleaner thunk for script engine
-    synchronized void cleanerThunk() {
+    void cleanerThunk() {
+        lifecycleLock.writeLock().lock();
         try {
             long ref = reference;
             // Notify early!
@@ -131,6 +159,8 @@ public final class V8Isolate implements V8Inspector {
             if (V8.DEBUG) {
                 th.printStackTrace();
             }
+        } finally {
+            lifecycleLock.writeLock().unlock();
         }
     }
 

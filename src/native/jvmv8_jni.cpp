@@ -139,8 +139,13 @@ static MaybeLocal<Module> resolve_module_impl(V8Scope& scope, Local<Context> con
 
     // upcall into Java (don't use the utility method, since it clears the exception)
     JNIEnv* env = scope.getEnv();
-    jobject moduleContents = env->CallStaticObjectMethod(v8Class, v8ClassResolveModuleMethodID,
-        v2j_string(scope, specifier), jarr);
+    jstring javaSpecifier = v2j_string(scope, specifier);
+    jobject moduleContents;
+    {
+        V8Unlock unlock(&scope);
+        moduleContents = env->CallStaticObjectMethod(v8Class, v8ClassResolveModuleMethodID,
+            javaSpecifier, jarr);
+    }
     jthrowable ex = env->ExceptionOccurred();
     if (ex != nullptr) {
         // propagate this exception back to the JS side

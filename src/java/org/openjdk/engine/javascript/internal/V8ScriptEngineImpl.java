@@ -68,7 +68,7 @@ public final class V8ScriptEngineImpl extends AbstractScriptEngine implements Co
 
             isolate.setClassLoader(loader);
             getContext().setBindings(engineScope, ScriptContext.ENGINE_SCOPE);
-            isolate.setScriptContext(getContext()); // set as default
+            isolate.setDefaultScriptContext(getContext());
         } catch (Throwable th) {
             // javax.script.ScriptEngineManager eats exceptions!
             // Show any initialization issue unconditionally!
